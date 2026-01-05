@@ -46,6 +46,12 @@ func BotAuthMiddleware() gin.HandlerFunc {
 }
 
 func GetBotID(c *gin.Context) string {
-	botID, _ := c.Get("bot_id")
-	return botID.(string)
+	botID, ok := c.Get("bot_id")
+	if !ok {
+		return ""
+	}
+	if id, ok := botID.(string); ok {
+		return id
+	}
+	return ""
 }

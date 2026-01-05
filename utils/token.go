@@ -13,6 +13,8 @@ func GenerateUUID() string {
 
 func GenerateBotToken() string {
 	bytes := make([]byte, 32)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		panic("failed to generate random token: " + err.Error())
+	}
 	return hex.EncodeToString(bytes)
 }

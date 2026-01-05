@@ -180,7 +180,12 @@ func AcceptFriendRequestInternal(c *gin.Context, userID, friendID string) {
 		return
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		tx.Rollback()
+		utils.InternalError(c, "database error")
+		return
+	}
 	if rowsAffected == 0 {
 		tx.Rollback()
 		utils.NotFound(c, "friend request not found")

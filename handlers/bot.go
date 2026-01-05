@@ -162,13 +162,18 @@ func DeleteBot(c *gin.Context) {
 		return
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		utils.InternalError(c, "database error")
+		return
+	}
 	if rowsAffected == 0 {
 		utils.NotFound(c, "bot not found")
 		return
 	}
 
-	database.DB.Exec("DELETE FROM bot_conversations WHERE bot_id = ?", botID)
+	// Clean up bot conversations (ignore error as bot is already deleted)
+	_, _ = database.DB.Exec("DELETE FROM bot_conversations WHERE bot_id = ?", botID)
 
 	utils.Success(c, nil)
 }
@@ -188,7 +193,11 @@ func RegenerateBotToken(c *gin.Context) {
 		return
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		utils.InternalError(c, "database error")
+		return
+	}
 	if rowsAffected == 0 {
 		utils.NotFound(c, "bot not found")
 		return
@@ -269,7 +278,7 @@ func BotSendMessage(c *gin.Context) {
 		return
 	}
 
-	database.DB.Exec("UPDATE conversations SET updated_at = ? WHERE id = ?", now, convID)
+	_, _ = database.DB.Exec("UPDATE conversations SET updated_at = ? WHERE id = ?", now, convID)
 
 	utils.Success(c, gin.H{"message_id": msgID})
 }

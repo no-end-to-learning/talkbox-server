@@ -43,7 +43,11 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	fileInfo, _ := out.Stat()
+	fileInfo, err := out.Stat()
+	if err != nil {
+		utils.InternalError(c, "failed to get file info")
+		return
+	}
 
 	utils.Success(c, gin.H{
 		"url":       "/files/" + filename,
@@ -66,8 +70,16 @@ func ServeFile(c *gin.Context) {
 	filePath := filepath.Join(config.Cfg.UploadDir, cleanFilename)
 
 	// 确保最终路径在上传目录内
-	absUploadDir, _ := filepath.Abs(config.Cfg.UploadDir)
-	absFilePath, _ := filepath.Abs(filePath)
+	absUploadDir, err := filepath.Abs(config.Cfg.UploadDir)
+	if err != nil {
+		utils.InternalError(c, "server configuration error")
+		return
+	}
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		utils.BadRequest(c, "invalid file path")
+		return
+	}
 	if !strings.HasPrefix(absFilePath, absUploadDir+string(filepath.Separator)) {
 		utils.BadRequest(c, "invalid file path")
 		return
