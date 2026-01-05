@@ -1,14 +1,17 @@
 package websocket
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"talkbox/config"
 	"talkbox/database"
 	"talkbox/models"
 	"talkbox/utils"
@@ -25,7 +28,32 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true
+		origin := r.Header.Get("Origin")
+
+		// 允许无 Origin 的请求（如某些客户端）
+		if origin == "" {
+			return true
+		}
+
+		// 确保配置已加载
+		if config.Cfg == nil {
+			log.Println("WARNING: config not loaded, allowing all origins")
+			return true
+		}
+
+		allowedOrigins := config.Cfg.AllowedOrigins
+		if allowedOrigins == "*" {
+			return true
+		}
+
+		for _, allowed := range strings.Split(allowedOrigins, ",") {
+			if strings.TrimSpace(allowed) == origin {
+				return true
+			}
+		}
+
+		log.Printf("WebSocket origin rejected: %s (allowed: %s)", origin, allowedOrigins)
+		return false
 	},
 }
 
@@ -126,10 +154,13 @@ func (c *Client) handleSendMessage(msg *ClientMessage) {
 	msgID := uuid.New().String()
 	now := time.Now()
 
+	// 正确处理 reply_to_id：空字符串应为 NULL
+	replyToID := sql.NullString{String: msg.ReplyToID, Valid: msg.ReplyToID != ""}
+
 	_, err := database.DB.Exec(`
 		INSERT INTO messages (id, conversation_id, sender_id, sender_type, type, content, reply_to_id, created_at, updated_at)
 		VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?)
-	`, msgID, msg.ConversationID, c.UserID, msg.Type, string(msg.Content), msg.ReplyToID, now, now)
+	`, msgID, msg.ConversationID, c.UserID, msg.Type, string(msg.Content), replyToID, now, now)
 
 	if err != nil {
 		return

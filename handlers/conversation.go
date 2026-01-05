@@ -101,6 +101,7 @@ func CreateConversation(c *gin.Context) {
 		return
 	}
 
+	var failedMembers []string
 	for _, uid := range req.MemberIDs {
 		if uid == userID {
 			continue
@@ -111,7 +112,7 @@ func CreateConversation(c *gin.Context) {
 			mid, convID, uid, now, now,
 		)
 		if err != nil {
-			continue
+			failedMembers = append(failedMembers, uid)
 		}
 	}
 
@@ -120,7 +121,11 @@ func CreateConversation(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, gin.H{"id": convID})
+	response := gin.H{"id": convID}
+	if len(failedMembers) > 0 {
+		response["failed_members"] = failedMembers
+	}
+	utils.Success(c, response)
 }
 
 func GetConversation(c *gin.Context) {
@@ -148,7 +153,7 @@ func GetConversation(c *gin.Context) {
 	}
 
 	rows, err := database.DB.Query(`
-		SELECT m.id, m.user_id, m.role, m.nickname, u.username, u.nickname as user_nickname, u.avatar
+		SELECT m.id, m.user_id, m.role, COALESCE(m.nickname, ''), u.username, COALESCE(u.nickname, ''), COALESCE(u.avatar, '')
 		FROM conversation_members m
 		JOIN users u ON u.id = m.user_id
 		WHERE m.conversation_id = ?
@@ -171,8 +176,31 @@ func GetConversation(c *gin.Context) {
 		members = append(members, m)
 	}
 
+	// Fetch bots in this conversation
+	botRows, err := database.DB.Query(`
+		SELECT b.id, b.name, COALESCE(b.avatar, ''), COALESCE(b.description, ''), b.created_at
+		FROM bots b
+		JOIN bot_conversations bc ON b.id = bc.bot_id
+		WHERE bc.conversation_id = ?
+	`, convID)
+	if err != nil {
+		utils.InternalError(c, "database error")
+		return
+	}
+	defer botRows.Close()
+
+	var bots []models.BotResponse
+	for botRows.Next() {
+		var bot models.BotResponse
+		if err := botRows.Scan(&bot.ID, &bot.Name, &bot.Avatar, &bot.Description, &bot.CreatedAt); err != nil {
+			continue
+		}
+		bots = append(bots, bot)
+	}
+
 	resp := conv.ToResponse()
 	resp.Members = members
+	resp.Bots = bots
 
 	utils.Success(c, resp)
 }
@@ -221,6 +249,23 @@ func DeleteConversation(c *gin.Context) {
 		return
 	}
 
+	// 删除提及记录
+	_, err = tx.Exec("DELETE FROM mentions WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)", convID)
+	if err != nil {
+		tx.Rollback()
+		utils.InternalError(c, "failed to delete mentions")
+		return
+	}
+
+	// 删除消息
+	_, err = tx.Exec("DELETE FROM messages WHERE conversation_id = ?", convID)
+	if err != nil {
+		tx.Rollback()
+		utils.InternalError(c, "failed to delete messages")
+		return
+	}
+
+	// 删除成员
 	_, err = tx.Exec("DELETE FROM conversation_members WHERE conversation_id = ?", convID)
 	if err != nil {
 		tx.Rollback()
@@ -228,6 +273,7 @@ func DeleteConversation(c *gin.Context) {
 		return
 	}
 
+	// 删除Bot关联
 	_, err = tx.Exec("DELETE FROM bot_conversations WHERE conversation_id = ?", convID)
 	if err != nil {
 		tx.Rollback()
@@ -235,6 +281,7 @@ func DeleteConversation(c *gin.Context) {
 		return
 	}
 
+	// 删除会话
 	_, err = tx.Exec("DELETE FROM conversations WHERE id = ?", convID)
 	if err != nil {
 		tx.Rollback()

@@ -31,6 +31,7 @@ type ConversationResponse struct {
 	CreatedAt time.Time        `json:"created_at"`
 	UpdatedAt time.Time        `json:"updated_at"`
 	Members   []MemberWithUser `json:"members,omitempty"`
+	Bots      []BotResponse    `json:"bots,omitempty"`
 }
 
 type MemberWithUser struct {

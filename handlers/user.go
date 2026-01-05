@@ -77,6 +77,26 @@ func UploadAvatar(c *gin.Context) {
 	}
 	defer file.Close()
 
+	// 限制头像大小为 2MB
+	maxSize := int64(2 * 1024 * 1024)
+	if header.Size > maxSize {
+		utils.BadRequest(c, "avatar too large (max 2MB)")
+		return
+	}
+
+	// 验证文件类型为图片
+	mimeType := header.Header.Get("Content-Type")
+	allowedTypes := map[string]bool{
+		"image/jpeg": true,
+		"image/png":  true,
+		"image/gif":  true,
+		"image/webp": true,
+	}
+	if !allowedTypes[mimeType] {
+		utils.BadRequest(c, "avatar must be an image (jpeg, png, gif, webp)")
+		return
+	}
+
 	ext := filepath.Ext(header.Filename)
 	filename := utils.GenerateUUID() + ext
 	uploadPath := filepath.Join(config.Cfg.UploadDir, filename)
@@ -152,6 +172,36 @@ func UnregisterDeviceToken(c *gin.Context) {
 	}
 
 	utils.Success(c, nil)
+}
+
+func GetAllUsers(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+
+	rows, err := database.DB.Query(`
+		SELECT id, username, nickname, avatar FROM users
+		WHERE id != ?
+		ORDER BY nickname, username
+	`, userID)
+	if err != nil {
+		utils.InternalError(c, "database error")
+		return
+	}
+	defer rows.Close()
+
+	var users []models.UserResponse
+	for rows.Next() {
+		var user models.User
+		if err := rows.Scan(&user.ID, &user.Username, &user.Nickname, &user.Avatar); err != nil {
+			continue
+		}
+		users = append(users, *user.ToResponse())
+	}
+
+	if users == nil {
+		users = []models.UserResponse{}
+	}
+
+	utils.Success(c, users)
 }
 
 func SearchUsers(c *gin.Context) {

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,6 +18,14 @@ type SendMessageRequest struct {
 	Type      string          `json:"type" binding:"required,oneof=text image video file card"`
 	Content   json.RawMessage `json:"content" binding:"required"`
 	ReplyToID string          `json:"reply_to_id"`
+}
+
+// escapeLikePattern 转义 SQL LIKE 查询中的特殊字符
+func escapeLikePattern(pattern string) string {
+	pattern = strings.ReplaceAll(pattern, "\\", "\\\\")
+	pattern = strings.ReplaceAll(pattern, "%", "\\%")
+	pattern = strings.ReplaceAll(pattern, "_", "\\_")
+	return pattern
 }
 
 func GetMessages(c *gin.Context) {
@@ -38,22 +47,20 @@ func GetMessages(c *gin.Context) {
 	var rows *sql.Rows
 	var err error
 
+	// 使用 LEFT JOIN 一次性获取消息和发送者信息，解决 N+1 问题
+	baseQuery := `
+		SELECT m.id, m.conversation_id, m.sender_id, m.sender_type, m.type, m.content, m.reply_to_id, m.created_at,
+			   COALESCE(u.id, '') as user_id, COALESCE(u.username, '') as username, COALESCE(u.nickname, '') as user_nickname, COALESCE(u.avatar, '') as user_avatar,
+			   COALESCE(b.id, '') as bot_id, COALESCE(b.name, '') as bot_name, COALESCE(b.avatar, '') as bot_avatar
+		FROM messages m
+		LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
+		LEFT JOIN bots b ON m.sender_type = 'bot' AND m.sender_id = b.id
+		WHERE m.conversation_id = ?`
+
 	if before != "" {
-		rows, err = database.DB.Query(`
-			SELECT m.id, m.conversation_id, m.sender_id, m.sender_type, m.type, m.content, m.reply_to_id, m.created_at
-			FROM messages m
-			WHERE m.conversation_id = ? AND m.created_at < ?
-			ORDER BY m.created_at DESC
-			LIMIT ?
-		`, convID, before, limit)
+		rows, err = database.DB.Query(baseQuery+` AND m.created_at < ? ORDER BY m.created_at DESC LIMIT ?`, convID, before, limit)
 	} else {
-		rows, err = database.DB.Query(`
-			SELECT m.id, m.conversation_id, m.sender_id, m.sender_type, m.type, m.content, m.reply_to_id, m.created_at
-			FROM messages m
-			WHERE m.conversation_id = ?
-			ORDER BY m.created_at DESC
-			LIMIT ?
-		`, convID, limit)
+		rows, err = database.DB.Query(baseQuery+` ORDER BY m.created_at DESC LIMIT ?`, convID, limit)
 	}
 
 	if err != nil {
@@ -62,20 +69,27 @@ func GetMessages(c *gin.Context) {
 	}
 	defer rows.Close()
 
+	// 收集所有消息和需要查询回复的消息ID
 	var messages []models.MessageResponse
+	var replyIDs []string
+	replyIDMap := make(map[string]int) // replyID -> message index
+
 	for rows.Next() {
-		var msgID, convID, senderID, senderType, msgType string
+		var msgID, cID, senderID, senderType, msgType string
 		var contentJSON []byte
 		var replyToID sql.NullString
 		var createdAt time.Time
+		var userID, username, userNickname, userAvatar string
+		var botID, botName, botAvatar string
 
-		if err := rows.Scan(&msgID, &convID, &senderID, &senderType, &msgType, &contentJSON, &replyToID, &createdAt); err != nil {
+		if err := rows.Scan(&msgID, &cID, &senderID, &senderType, &msgType, &contentJSON, &replyToID, &createdAt,
+			&userID, &username, &userNickname, &userAvatar, &botID, &botName, &botAvatar); err != nil {
 			continue
 		}
 
 		resp := models.MessageResponse{
 			ID:             msgID,
-			ConversationID: convID,
+			ConversationID: cID,
 			Type:           msgType,
 			Content:        json.RawMessage(contentJSON),
 			CreatedAt:      createdAt,
@@ -83,62 +97,73 @@ func GetMessages(c *gin.Context) {
 
 		if replyToID.Valid {
 			resp.ReplyToID = replyToID.String
+			replyIDMap[replyToID.String] = len(messages)
+			replyIDs = append(replyIDs, replyToID.String)
 		}
 
 		if senderType == "user" {
-			var user models.User
-			database.DB.QueryRow(
-				"SELECT id, username, nickname, avatar FROM users WHERE id = ?",
-				senderID,
-			).Scan(&user.ID, &user.Username, &user.Nickname, &user.Avatar)
 			resp.Sender = models.SenderInfo{
-				ID:       user.ID,
+				ID:       userID,
 				Type:     "user",
-				Nickname: user.Nickname,
-				Avatar:   user.Avatar,
+				Nickname: userNickname,
+				Avatar:   userAvatar,
 			}
 		} else {
-			var bot models.Bot
-			database.DB.QueryRow(
-				"SELECT id, name, avatar FROM bots WHERE id = ?",
-				senderID,
-			).Scan(&bot.ID, &bot.Name, &bot.Avatar)
 			resp.Sender = models.SenderInfo{
-				ID:       bot.ID,
+				ID:       botID,
 				Type:     "bot",
-				Nickname: bot.Name,
-				Avatar:   bot.Avatar,
-			}
-		}
-
-		if replyToID.Valid {
-			var replyMsgID, replyType string
-			var replyContent []byte
-			var replySenderID, replySenderType string
-			err := database.DB.QueryRow(
-				"SELECT id, type, content, sender_id, sender_type FROM messages WHERE id = ?",
-				replyToID.String,
-			).Scan(&replyMsgID, &replyType, &replyContent, &replySenderID, &replySenderType)
-			if err == nil {
-				reply := models.ReplyInfo{
-					ID:      replyMsgID,
-					Type:    replyType,
-					Content: json.RawMessage(replyContent),
-				}
-				if replySenderType == "user" {
-					var nickname string
-					database.DB.QueryRow("SELECT nickname FROM users WHERE id = ?", replySenderID).Scan(&nickname)
-					reply.SenderName = nickname
-				} else {
-					var name string
-					database.DB.QueryRow("SELECT name FROM bots WHERE id = ?", replySenderID).Scan(&name)
-					reply.SenderName = name
-				}
-				resp.ReplyTo = &reply
+				Nickname: botName,
+				Avatar:   botAvatar,
 			}
 		}
 
 		messages = append(messages, resp)
+	}
+
+	// 批量查询回复消息信息
+	if len(replyIDs) > 0 {
+		placeholders := strings.Repeat("?,", len(replyIDs)-1) + "?"
+		args := make([]interface{}, len(replyIDs))
+		for i, id := range replyIDs {
+			args[i] = id
+		}
+
+		replyRows, err := database.DB.Query(`
+			SELECT m.id, m.type, m.content, m.sender_id, m.sender_type,
+				   COALESCE(u.nickname, '') as user_nickname,
+				   COALESCE(b.name, '') as bot_name
+			FROM messages m
+			LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
+			LEFT JOIN bots b ON m.sender_type = 'bot' AND m.sender_id = b.id
+			WHERE m.id IN (`+placeholders+`)
+		`, args...)
+
+		if err == nil {
+			defer replyRows.Close()
+			for replyRows.Next() {
+				var replyMsgID, replyType, replySenderID, replySenderType string
+				var replyContent []byte
+				var userNickname, botName string
+
+				if err := replyRows.Scan(&replyMsgID, &replyType, &replyContent, &replySenderID, &replySenderType, &userNickname, &botName); err != nil {
+					continue
+				}
+
+				if idx, ok := replyIDMap[replyMsgID]; ok {
+					reply := models.ReplyInfo{
+						ID:      replyMsgID,
+						Type:    replyType,
+						Content: json.RawMessage(replyContent),
+					}
+					if replySenderType == "user" {
+						reply.SenderName = userNickname
+					} else {
+						reply.SenderName = botName
+					}
+					messages[idx].ReplyTo = &reply
+				}
+			}
+		}
 	}
 
 	if messages == nil {
@@ -223,13 +248,15 @@ func SearchMessages(c *gin.Context) {
 	`, convID, query, limit)
 
 	if err != nil {
+		// 转义 LIKE 特殊字符防止意外匹配
+		escapedQuery := "%" + escapeLikePattern(query) + "%"
 		rows, err = database.DB.Query(`
 			SELECT m.id, m.conversation_id, m.sender_id, m.sender_type, m.type, m.content, m.reply_to_id, m.created_at
 			FROM messages m
-			WHERE m.conversation_id = ? AND m.type = 'text' AND m.content LIKE ?
+			WHERE m.conversation_id = ? AND m.type = 'text' AND m.content LIKE ? ESCAPE '\\'
 			ORDER BY m.created_at DESC
 			LIMIT ?
-		`, convID, "%"+query+"%", limit)
+		`, convID, escapedQuery, limit)
 		if err != nil {
 			utils.InternalError(c, "database error")
 			return

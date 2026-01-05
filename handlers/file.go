@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"talkbox/config"
@@ -25,7 +26,7 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	ext := filepath.Ext(header.Filename)
+	ext := strings.ToLower(filepath.Ext(header.Filename))
 	filename := utils.GenerateUUID() + ext
 	uploadPath := filepath.Join(config.Cfg.UploadDir, filename)
 
@@ -54,7 +55,23 @@ func UploadFile(c *gin.Context) {
 
 func ServeFile(c *gin.Context) {
 	filename := c.Param("filename")
-	filePath := filepath.Join(config.Cfg.UploadDir, filename)
+
+	// 防止路径遍历攻击：清理文件名并验证
+	cleanFilename := filepath.Clean(filename)
+	if cleanFilename != filepath.Base(cleanFilename) || cleanFilename == "." || cleanFilename == ".." {
+		utils.BadRequest(c, "invalid filename")
+		return
+	}
+
+	filePath := filepath.Join(config.Cfg.UploadDir, cleanFilename)
+
+	// 确保最终路径在上传目录内
+	absUploadDir, _ := filepath.Abs(config.Cfg.UploadDir)
+	absFilePath, _ := filepath.Abs(filePath)
+	if !strings.HasPrefix(absFilePath, absUploadDir+string(filepath.Separator)) {
+		utils.BadRequest(c, "invalid file path")
+		return
+	}
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		utils.NotFound(c, "file not found")

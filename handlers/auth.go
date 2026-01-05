@@ -91,10 +91,11 @@ func Login(c *gin.Context) {
 	}
 
 	var user models.User
+	var avatar sql.NullString
 	err := database.DB.QueryRow(
 		"SELECT id, username, nickname, avatar, password FROM users WHERE username = ?",
 		req.Username,
-	).Scan(&user.ID, &user.Username, &user.Nickname, &user.Avatar, &user.Password)
+	).Scan(&user.ID, &user.Username, &user.Nickname, &avatar, &user.Password)
 
 	if err == sql.ErrNoRows {
 		utils.Unauthorized(c, "invalid username or password")
@@ -103,6 +104,9 @@ func Login(c *gin.Context) {
 	if err != nil {
 		utils.InternalError(c, "database error")
 		return
+	}
+	if avatar.Valid {
+		user.Avatar = avatar.String
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {

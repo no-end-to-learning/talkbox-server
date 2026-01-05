@@ -36,6 +36,5 @@ func AuthMiddleware() gin.HandlerFunc {
 }
 
 func GetUserID(c *gin.Context) string {
-	userID, _ := c.Get("user_id")
-	return userID.(string)
+	return c.GetString("user_id")
 }

@@ -49,6 +49,7 @@ func main() {
 	users := r.Group("/api/users")
 	users.Use(middleware.AuthMiddleware())
 	{
+		users.GET("", handlers.GetAllUsers)
 		users.GET("/me", handlers.GetCurrentUser)
 		users.PUT("/me", handlers.UpdateCurrentUser)
 		users.POST("/me/avatar", handlers.UploadAvatar)
