@@ -489,3 +489,60 @@ func getConversationRole(convID, userID string) string {
 	).Scan(&role)
 	return role
 }
+
+func FindOrCreatePrivateConversation(userA, userB string) (string, error) {
+	if userA > userB {
+		userA, userB = userB, userA
+	}
+
+	var convID string
+	err := database.DB.QueryRow(`
+		SELECT c.id FROM conversations c
+		JOIN conversation_members m1 ON c.id = m1.conversation_id AND m1.user_id = ?
+		JOIN conversation_members m2 ON c.id = m2.conversation_id AND m2.user_id = ?
+		WHERE c.type = 'private'
+	`, userA, userB).Scan(&convID)
+
+	if err == nil {
+		return convID, nil
+	}
+
+	if err != sql.ErrNoRows {
+		return "", err
+	}
+
+	tx, err := database.DB.Begin()
+	if err != nil {
+		return "", err
+	}
+
+	convID = utils.GenerateUUID()
+	now := time.Now()
+
+	_, err = tx.Exec(
+		"INSERT INTO conversations (id, type, created_at, updated_at) VALUES (?, 'private', ?, ?)",
+		convID, now, now,
+	)
+	if err != nil {
+		tx.Rollback()
+		return "", err
+	}
+
+	for _, uid := range []string{userA, userB} {
+		memberID := utils.GenerateUUID()
+		_, err = tx.Exec(
+			"INSERT INTO conversation_members (id, conversation_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, 'member', ?, ?)",
+			memberID, convID, uid, now, now,
+		)
+		if err != nil {
+			tx.Rollback()
+			return "", err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+
+	return convID, nil
+}

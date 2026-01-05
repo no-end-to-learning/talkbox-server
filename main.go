@@ -58,16 +58,6 @@ func main() {
 		users.GET("/search", handlers.SearchUsers)
 	}
 
-	friends := r.Group("/api/friends")
-	friends.Use(middleware.AuthMiddleware())
-	{
-		friends.GET("", handlers.GetFriends)
-		friends.GET("/requests", handlers.GetFriendRequests)
-		friends.POST("/request", handlers.SendFriendRequest)
-		friends.POST("/accept/:user_id", handlers.AcceptFriendRequest)
-		friends.DELETE("/:user_id", handlers.DeleteFriend)
-	}
-
 	conversations := r.Group("/api/conversations")
 	conversations.Use(middleware.AuthMiddleware())
 	{

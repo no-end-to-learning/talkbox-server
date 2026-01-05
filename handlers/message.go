@@ -334,17 +334,6 @@ func StartPrivateChat(c *gin.Context) {
 		return
 	}
 
-	var isFriend bool
-	database.DB.QueryRow(
-		"SELECT EXISTS(SELECT 1 FROM friendships WHERE user_id = ? AND friend_id = ? AND status = 'accepted')",
-		userID, req.UserID,
-	).Scan(&isFriend)
-
-	if !isFriend {
-		utils.Forbidden(c, "can only chat with friends")
-		return
-	}
-
 	convID, err := FindOrCreatePrivateConversation(userID, req.UserID)
 	if err != nil {
 		utils.InternalError(c, "failed to create conversation")

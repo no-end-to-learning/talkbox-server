@@ -27,12 +27,10 @@ Go + Gin + MySQL 聊天服务端，支持 REST API 和 WebSocket 实时通信。
 │   ├── user.go          # 用户模型
 │   ├── conversation.go  # 会话模型
 │   ├── message.go       # 消息模型
-│   ├── friendship.go    # 好友关系模型
 │   └── bot.go           # Bot 模型
 ├── handlers/
 │   ├── auth.go          # 认证接口
 │   ├── user.go          # 用户接口
-│   ├── friend.go        # 好友接口
 │   ├── conversation.go  # 会话接口
 │   ├── message.go       # 消息接口
 │   ├── file.go          # 文件接口

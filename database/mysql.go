@@ -118,16 +118,6 @@ func CreateTables() error {
 			updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			UNIQUE KEY uk_user_platform (user_id, platform)
 		)`,
-		`CREATE TABLE IF NOT EXISTS friendships (
-			id          VARCHAR(36) PRIMARY KEY,
-			user_id     VARCHAR(36) NOT NULL,
-			friend_id   VARCHAR(36) NOT NULL,
-			status      ENUM('pending', 'accepted', 'blocked') DEFAULT 'pending',
-			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-			UNIQUE KEY uk_friendship (user_id, friend_id),
-			INDEX idx_friend (friend_id)
-		)`,
 	}
 
 	for _, table := range tables {
