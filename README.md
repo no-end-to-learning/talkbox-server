@@ -5,7 +5,7 @@ Go + Gin + MySQL 聊天服务端，支持 REST API 和 WebSocket 实时通信。
 ## 功能特性
 
 - 用户注册/登录（JWT 认证）
-- 好友系统（添加、接受、删除）
+- 用户列表（客户端可直接私聊任意用户）
 - 私聊和群聊
 - 群组管理（成员、管理员、Bot）
 - 多种消息类型（文字、图片、视频、文件、卡片）
@@ -119,16 +119,6 @@ go build -ldflags="-s -w" -o talkbox .
 | POST | /api/users/me/device | 注册设备 Token |
 | DELETE | /api/users/me/device | 注销设备 Token |
 | GET | /api/users/search | 搜索用户 |
-
-### 好友
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/friends | 好友列表 |
-| GET | /api/friends/requests | 好友请求列表 |
-| POST | /api/friends/request | 发送好友请求 |
-| POST | /api/friends/accept/:user_id | 接受好友请求 |
-| DELETE | /api/friends/:user_id | 删除好友 |
 
 ### 会话
 
